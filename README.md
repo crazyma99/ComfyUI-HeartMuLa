@@ -82,6 +82,12 @@
 This project provides ComfyUI nodes for running the HeartMuLa-oss-3B music generation model.
 It is self-contained and includes the `heartlib` core library.
 
+### Workflow Example
+
+![Workflow Example](./assets/workflow_example.png)
+
+👉 **[Download Workflow File (HeartMuLa-oss-gen-example.json)](https://github.com/crazyma99/ComfyUI-HeartMuLa/blob/master/HeartMuLa-oss-gen-example.json)**
+
 ### Installation
 
 1.  Copy the `ComfyUI-HeartMuLa` folder into your `ComfyUI/custom_nodes/` directory.
