@@ -1,0 +1,144 @@
+.heartmula-presets-container {
+    background: #333;
+    padding: 0;
+    border-radius: 4px;
+    font-family: sans-serif;
+    color: #eee;
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #444;
+    overflow: hidden;
+}
+
+.heartmula-tabs {
+    display: flex;
+    background: #222;
+    border-bottom: 1px solid #444;
+}
+
+.heartmula-tab {
+    flex: 1;
+    text-align: center;
+    padding: 8px 4px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #aaa;
+    border-right: 1px solid #444;
+    transition: all 0.2s;
+}
+
+.heartmula-tab:last-child {
+    border-right: none;
+}
+
+.heartmula-tab:hover {
+    background: #2a2a2a;
+    color: #ccc;
+}
+
+.heartmula-tab.active {
+    background: #333;
+    color: #fff;
+    font-weight: bold;
+    border-bottom: 2px solid #2a6;
+}
+
+.heartmula-content {
+    padding: 10px;
+    min-height: 200px;
+    max-height: 400px;
+    background: #333;
+    overflow-y: auto;
+}
+
+/* Custom scrollbar */
+.heartmula-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.heartmula-content::-webkit-scrollbar-track {
+    background: #222;
+}
+
+.heartmula-content::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
+}
+
+.heartmula-content::-webkit-scrollbar-thumb:hover {
+    background: #666;
+}
+
+.heartmula-tab-content {
+    display: none;
+}
+
+.heartmula-tab-content.active {
+    display: block;
+}
+
+.heartmula-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 8px;
+}
+
+.heartmula-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 3px;
+    transition: background 0.2s;
+}
+
+.heartmula-checkbox-item:hover {
+    background: #444;
+}
+
+.heartmula-checkbox-box {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #666;
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #222;
+}
+
+.heartmula-checkbox-item.selected .heartmula-checkbox-box {
+    background: #2a6;
+    border-color: #2a6;
+}
+
+.heartmula-checkbox-box::after {
+    content: '';
+    display: block;
+    width: 4px;
+    height: 8px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+    opacity: 0;
+}
+
+.heartmula-checkbox-item.selected .heartmula-checkbox-box::after {
+    opacity: 1;
+}
+
+.heartmula-checkbox-label {
+    font-size: 11px;
+    user-select: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Radio style for single select (Gender) */
+.heartmula-radio-item .heartmula-checkbox-box {
+    border-radius: 50%;
+}

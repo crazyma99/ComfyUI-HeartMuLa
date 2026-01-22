@@ -1,0 +1,616 @@
+from tokenizers import Tokenizer
+from ..heartmula.modeling_heartmula import HeartMuLa
+from ..heartcodec.modeling_heartcodec import HeartCodec
+import torch
+from typing import Dict, Any, Optional, Union, Callable
+import os
+import sys
+from dataclasses import dataclass
+from tqdm import tqdm
+import torchaudio
+import json
+from contextlib import contextmanager
+import soundfile as sf
+from safetensors import safe_open
+from safetensors.torch import load_file
+from ..heartmula.configuration_heartmula import HeartMuLaConfig
+from ..heartcodec.configuration_heartcodec import HeartCodecConfig
+
+def _load_model_from_path(path, model_class, config_class, device, dtype):
+    if os.path.isfile(path):
+        print(f"Loading {model_class.__name__} from single file: {path}")
+        config = None
+        # Try metadata
+        if path.endswith(".safetensors"):
+             try:
+                 with safe_open(path, framework="pt", device="cpu") as f:
+                     metadata = f.metadata()
+                     if metadata:
+                         # Check for various config keys
+                         for key in ["config", "config.json", "configuration.json"]:
+                             if key in metadata:
+                                 print(f"Loading config from metadata key: {key}")
+                                 config_dict = json.loads(metadata[key])
+                                 config = config_class(**config_dict)
+                                 break
+             except Exception as e:
+                 print(f"Error loading config from metadata: {e}")
+        
+        if config is None:
+             # Try sidecar file
+             base_dir = os.path.dirname(path)
+             config_path = os.path.join(base_dir, "config.json")
+             if os.path.exists(config_path):
+                 print(f"Loading config from file: {config_path}")
+                 config = config_class.from_pretrained(base_dir)
+             else:
+                 raise ValueError(f"Could not find config for {path} in metadata or directory.")
+
+        model = model_class(config)
+        state_dict = load_file(path)
+        # Filter state_dict if needed? usually load_file returns matching keys.
+        model.load_state_dict(state_dict, strict=False) 
+        model.to(device=device, dtype=dtype)
+        return model
+    else:
+        # Directory
+        return model_class.from_pretrained(path, device_map=device, dtype=dtype)
+
+def _resolve_paths(pretrained_path: str, version: str):
+    
+    # Determine the plugin's essential_files directory for fallback
+    # This file is in .../ComfyUI-HeartMuLa/heartlib/pipelines/music_generation.py
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    # Go up 2 levels: pipelines -> heartlib -> ComfyUI-HeartMuLa
+    plugin_root = os.path.abspath(os.path.join(current_file_dir, "..", ".."))
+    essential_files_dir = os.path.join(plugin_root, "essential_files")
+
+    heartmula_path = None
+    heartcodec_path = None
+    tokenizer_path = None
+    gen_config_path = None
+
+    # Case 1: If the user provides a direct path to a file (the model weights)
+    if os.path.isfile(pretrained_path):
+        base_dir = os.path.dirname(pretrained_path)
+        heartmula_path = pretrained_path
+        
+        # Look for auxiliary files in the same directory first
+        codec_local = os.path.join(base_dir, "HeartCodec-oss")
+        codec_merged = os.path.join(base_dir, "HeartCodec-oss-merged.safetensors")
+        
+        if os.path.exists(codec_merged):
+            heartcodec_path = codec_merged
+        elif os.path.exists(codec_local):
+            heartcodec_path = codec_local
+            
+        tokenizer_local = os.path.join(base_dir, "tokenizer.json")
+        if os.path.exists(tokenizer_local):
+            tokenizer_path = tokenizer_local
+            
+        gen_config_local = os.path.join(base_dir, "gen_config.json")
+        if os.path.exists(gen_config_local):
+            gen_config_path = gen_config_local
+
+    # Case 2: If the user provides a directory (or we fell through, though we expect file from nodes.py now)
+    else:
+        # Original logic adapted
+        heartmula_path_orig = os.path.join(pretrained_path, f"HeartMuLa-oss-{version}")
+        merged_path = os.path.join(pretrained_path, "HeartMuLa-oss-3B-merged.safetensors")
+        model_safetensors = os.path.join(pretrained_path, "model.safetensors")
+        
+        if os.path.exists(heartmula_path_orig):
+            heartmula_path = heartmula_path_orig
+        elif os.path.exists(merged_path):
+            heartmula_path = merged_path
+        elif os.path.exists(model_safetensors):
+            heartmula_path = model_safetensors
+        elif version == "3B-merged" and os.path.exists(os.path.join(pretrained_path, "model.safetensors")):
+             heartmula_path = os.path.join(pretrained_path, "model.safetensors")
+        else:
+             # Default fallback if nothing found, to let it fail later or be caught
+             heartmula_path = heartmula_path_orig
+
+        # Check local dir for aux files
+        codec_local = os.path.join(pretrained_path, "HeartCodec-oss")
+        codec_merged = os.path.join(pretrained_path, "HeartCodec-oss-merged.safetensors")
+        
+        if os.path.exists(codec_merged):
+            heartcodec_path = codec_merged
+        elif os.path.exists(codec_local):
+            heartcodec_path = codec_local
+            
+        tokenizer_local = os.path.join(pretrained_path, "tokenizer.json")
+        if os.path.exists(tokenizer_local):
+            tokenizer_path = tokenizer_local
+            
+        gen_config_local = os.path.join(pretrained_path, "gen_config.json")
+        if os.path.exists(gen_config_local):
+            gen_config_path = gen_config_local
+
+    # FALLBACK LOGIC: If files not found locally, try essential_files in plugin dir
+    if not heartcodec_path or not os.path.exists(heartcodec_path):
+        fallback_codec = os.path.join(essential_files_dir, "HeartCodec-oss")
+        if os.path.exists(fallback_codec):
+            print(f"HeartCodec not found in checkpoint dir, using fallback: {fallback_codec}")
+            heartcodec_path = fallback_codec
+        else:
+            # Keep original path to raise error
+            if not heartcodec_path: heartcodec_path = os.path.join(pretrained_path, "HeartCodec-oss")
+
+    if not tokenizer_path or not os.path.exists(tokenizer_path):
+         if not tokenizer_path: tokenizer_path = os.path.join(pretrained_path, "tokenizer.json")
+
+    if not gen_config_path or not os.path.exists(gen_config_path):
+         if not gen_config_path: gen_config_path = os.path.join(pretrained_path, "gen_config.json")
+
+    return heartmula_path, heartcodec_path, tokenizer_path, gen_config_path
+
+
+def _resolve_devices(
+    device: Union[torch.device, Dict[str, torch.device]], lazy_load: bool
+):
+    if isinstance(device, torch.device):
+        print(f"All model components will be loaded to device: {device}.")
+        mula_device = device
+        codec_device = device
+    elif isinstance(device, dict):
+        print("Model components will be loaded to devices as specified:")
+        for k, v in device.items():
+            print(f"  {k}: {v}")
+        mula_device = device["mula"]
+        codec_device = device["codec"]
+    else:
+        raise ValueError(
+            "device must be either torch.device or Dict[str, torch.device]"
+        )
+
+    single_device = mula_device == codec_device
+    if not single_device:
+        print(
+            f"HeartMuLa and HeartCodec will be loaded to different devices. In this case, lazy_load is turned off."
+        )
+        lazy_load = False
+
+    return mula_device, codec_device, lazy_load
+
+
+@dataclass
+class HeartMuLaGenConfig:
+    text_bos_id: int = 128000
+    text_eos_id: int = 128001
+    audio_eos_id: int = 8193
+    empty_id: int = 0
+
+    @classmethod
+    def from_file(cls, path: str):
+        with open(path, encoding="utf-8") as fp:
+            data = json.load(fp)
+        return cls(**data)
+
+
+class HeartMuLaGenPipeline:
+    def __init__(
+        self,
+        heartmula_path: str,
+        heartcodec_path: str,
+        heartmula_device: torch.device,
+        heartcodec_device: torch.device,
+        heartmula_dtype: torch.dtype,
+        heartcodec_dtype: torch.dtype,
+        lazy_load: bool,
+        cpu_offload: bool,
+        muq_mulan: Optional[Any],
+        text_tokenizer: Tokenizer,
+        config: HeartMuLaGenConfig,
+    ):
+
+        self.muq_mulan = muq_mulan
+        self.text_tokenizer = text_tokenizer
+        self.config = config
+
+        # Remain fixed here for simplicity.
+        self._parallel_number = 8 + 1
+        self._muq_dim = 512
+
+        self.mula_dtype = heartmula_dtype
+        self.mula_path = heartmula_path
+        self.mula_device = heartmula_device
+        self.codec_dtype = heartcodec_dtype
+        self.codec_path = heartcodec_path
+        self.codec_device = heartcodec_device
+        self.cpu_offload = cpu_offload
+
+        self._mula: Optional[HeartMuLa] = None
+        self._codec: Optional[HeartCodec] = None
+        
+        if cpu_offload:
+            print("CPU offload enabled. Models will be loaded to CPU and moved to GPU on demand.")
+            lazy_load = False # cpu_offload overrides lazy_load
+            
+        if not lazy_load:
+            print(
+                f"You have set lazy_load = False. Loading HeartMuLa and HeartCodec onto device..."
+            )
+            # If cpu_offload is True, load to 'cpu' initially
+            load_device_mula = "cpu" if self.cpu_offload else self.mula_device
+            load_device_codec = "cpu" if self.cpu_offload else self.codec_device
+            
+            self._mula = _load_model_from_path(
+                self.mula_path,
+                HeartMuLa,
+                HeartMuLaConfig,
+                load_device_mula,
+                self.mula_dtype,
+            )
+            self._codec = _load_model_from_path(
+                self.codec_path,
+                HeartCodec,
+                HeartCodecConfig,
+                load_device_codec,
+                self.codec_dtype,
+            )
+        self.lazy_load = lazy_load
+
+    @property
+    def mula(self) -> HeartMuLa:
+        if isinstance(self._mula, HeartMuLa):
+            return self._mula
+        self._mula = _load_model_from_path(
+            self.mula_path,
+            HeartMuLa,
+            HeartMuLaConfig,
+            self.mula_device,
+            self.mula_dtype,
+        )
+        return self._mula
+
+    @property
+    def codec(self) -> HeartCodec:
+        if isinstance(self._codec, HeartCodec):
+            return self._codec
+        self._codec = _load_model_from_path(
+            self.codec_path,
+            HeartCodec,
+            HeartCodecConfig,
+            self.codec_device,
+            self.codec_dtype,
+        )
+        return self._codec
+
+    def _unload(self):
+        if not self.lazy_load:
+            return
+        if isinstance(self._mula, HeartMuLa):
+            print(f"You have set lazy_load=True. Unloading HeartMuLa from device.")
+            print(
+                f"CUDA memory before unloading: {torch.cuda.memory_allocated(self.mula_device) / 1024**3:.2f} GB"
+            )
+            del self._mula
+            gc.collect()
+            torch.cuda.empty_cache()
+            print(
+                f"CUDA memory after unloading: {torch.cuda.memory_allocated(self.mula_device) / 1024**3:.2f} GB"
+            )
+            self._mula = None
+        if isinstance(self._codec, HeartCodec):
+            print(f"You have set lazy_load=True. Unloading HeartCodec from device.")
+            print(
+                f"CUDA memory before unloading: {torch.cuda.memory_allocated(self.codec_device) / 1024**3:.2f} GB"
+            )
+            del self._codec
+            gc.collect()
+            torch.cuda.empty_cache()
+            print(
+                f"CUDA memory after unloading: {torch.cuda.memory_allocated(self.codec_device) / 1024**3:.2f} GB"
+            )
+            self._codec = None
+        return
+
+    def _sanitize_parameters(self, **kwargs):
+        preprocess_kwargs = {"cfg_scale": kwargs.get("cfg_scale", 1.5)}
+        forward_kwargs = {
+            "max_audio_length_ms": kwargs.get("max_audio_length_ms", 120_000),
+            "temperature": kwargs.get("temperature", 1.0),
+            "topk": kwargs.get("topk", 50),
+            "cfg_scale": kwargs.get("cfg_scale", 1.5),
+            "callback": kwargs.get("callback", None),
+        }
+        postprocess_kwargs = {
+            "save_path": kwargs.get("save_path", "output.mp3"),
+        }
+        return preprocess_kwargs, forward_kwargs, postprocess_kwargs
+
+    def preprocess(self, inputs: Dict[str, Any], cfg_scale: float):
+
+        # process tags
+        tags = inputs["tags"]
+        if os.path.isfile(tags):
+            with open(tags, encoding="utf-8") as fp:
+                tags = fp.read()
+        assert isinstance(tags, str), f"tags must be a string, but got {type(tags)}"
+
+        tags = tags.lower()
+        # encapsulate with special <tag> and </tag> tokens
+        if not tags.startswith("<tag>"):
+            tags = f"<tag>{tags}"
+        if not tags.endswith("</tag>"):
+            tags = f"{tags}</tag>"
+
+        tags_ids = self.text_tokenizer.encode(tags).ids
+        if tags_ids[0] != self.config.text_bos_id:
+            tags_ids = [self.config.text_bos_id] + tags_ids
+        if tags_ids[-1] != self.config.text_eos_id:
+            tags_ids = tags_ids + [self.config.text_eos_id]
+
+        # process reference audio
+        ref_audio = inputs.get("ref_audio", None)
+        if ref_audio is not None:
+            raise NotImplementedError("ref_audio is not supported yet.")
+        muq_embed = torch.zeros([self._muq_dim], dtype=self.mula_dtype)
+        muq_idx = len(tags_ids)
+
+        # process lyrics
+        lyrics = inputs["lyrics"]
+        if os.path.isfile(lyrics):
+            with open(lyrics, encoding="utf-8") as fp:
+                lyrics = fp.read()
+        assert isinstance(
+            lyrics, str
+        ), f"lyrics must be a string, but got {type(lyrics)}"
+        lyrics = lyrics.lower()
+
+        lyrics_ids = self.text_tokenizer.encode(lyrics).ids
+        if lyrics_ids[0] != self.config.text_bos_id:
+            lyrics_ids = [self.config.text_bos_id] + lyrics_ids
+        if lyrics_ids[-1] != self.config.text_eos_id:
+            lyrics_ids = lyrics_ids + [self.config.text_eos_id]
+
+        # cat them together. tags, ref_audio, lyrics
+        prompt_len = len(tags_ids) + 1 + len(lyrics_ids)
+
+        tokens = torch.zeros([prompt_len, self._parallel_number], dtype=torch.long)
+        tokens[: len(tags_ids), -1] = torch.tensor(tags_ids)
+        tokens[len(tags_ids) + 1 :, -1] = torch.tensor(lyrics_ids)
+
+        tokens_mask = torch.zeros_like(tokens, dtype=torch.bool)
+        tokens_mask[:, -1] = True
+
+        bs_size = 2 if cfg_scale != 1.0 else 1
+
+        def _cfg_cat(tensor: torch.Tensor, cfg_scale: float):
+            tensor = tensor.unsqueeze(0)
+            if cfg_scale != 1.0:
+                tensor = torch.cat([tensor, tensor], dim=0)
+            return tensor
+
+        return {
+            "tokens": _cfg_cat(tokens, cfg_scale),
+            "tokens_mask": _cfg_cat(tokens_mask, cfg_scale),
+            "muq_embed": _cfg_cat(muq_embed, cfg_scale),
+            "muq_idx": [muq_idx] * bs_size,
+            "pos": _cfg_cat(torch.arange(prompt_len, dtype=torch.long), cfg_scale),
+        }
+
+    def _forward(
+        self,
+        model_inputs: Dict[str, Any],
+        max_audio_length_ms: int,
+        temperature: float,
+        topk: int,
+        cfg_scale: float,
+        callback: Optional[Callable[[int, int], None]] = None,
+    ):
+        # Move Mula to GPU if offload is enabled
+        if self.cpu_offload:
+            print(f"Moving HeartMuLa to {self.mula_device}...")
+            self.mula.to(self.mula_device)
+            
+        # Ensure model is in correct dtype (safety net)
+        if self.mula.text_embeddings.weight.dtype != self.mula_dtype:
+             print(f"Warning: text_embeddings dtype {self.mula.text_embeddings.weight.dtype} mismatch with {self.mula_dtype}. Casting...")
+             self.mula.to(dtype=self.mula_dtype)
+
+        prompt_tokens = model_inputs["tokens"].to(self.mula_device)
+        prompt_tokens_mask = model_inputs["tokens_mask"].to(self.mula_device)
+        continuous_segment = model_inputs["muq_embed"].to(self.mula_device, dtype=self.mula_dtype)
+        starts = model_inputs["muq_idx"]
+        prompt_pos = model_inputs["pos"].to(self.mula_device)
+        frames = []
+
+        bs_size = 2 if cfg_scale != 1.0 else 1
+        self.mula.setup_caches(bs_size)
+        with torch.autocast(device_type=self.mula_device.type, dtype=self.mula_dtype):
+            curr_token = self.mula.generate_frame(
+                tokens=prompt_tokens,
+                tokens_mask=prompt_tokens_mask,
+                input_pos=prompt_pos,
+                temperature=temperature,
+                topk=topk,
+                cfg_scale=cfg_scale,
+                continuous_segments=continuous_segment,
+                starts=starts,
+            )
+        frames.append(curr_token[0:1,])
+
+        def _pad_audio_token(token: torch.Tensor):
+            padded_token = (
+                torch.ones(
+                    (token.shape[0], self._parallel_number),
+                    device=token.device,
+                    dtype=torch.long,
+                )
+                * self.config.empty_id
+            )
+            padded_token[:, :-1] = token
+            padded_token = padded_token.unsqueeze(1)
+            padded_token_mask = torch.ones_like(
+                padded_token, device=token.device, dtype=torch.bool
+            )
+            padded_token_mask[..., -1] = False
+            return padded_token, padded_token_mask
+
+        max_audio_frames = max_audio_length_ms // 80
+
+        # Always use tqdm for terminal progress, synced with callback
+        # Use file=sys.stdout to avoid potential stderr buffering issues causing newlines
+        iterator = tqdm(range(max_audio_frames), dynamic_ncols=True, file=sys.stdout, desc="Generating Audio")
+        
+        for i in iterator:
+            curr_token, curr_token_mask = _pad_audio_token(curr_token)
+            with torch.autocast(
+                device_type=self.mula_device.type, dtype=self.mula_dtype
+            ):
+                curr_token = self.mula.generate_frame(
+                    tokens=curr_token,
+                    tokens_mask=curr_token_mask,
+                    input_pos=prompt_pos[..., -1:] + i + 1,
+                    temperature=temperature,
+                    topk=topk,
+                    cfg_scale=cfg_scale,
+                    continuous_segments=None,
+                    starts=None,
+                )
+            if torch.any(curr_token[0:1, :] >= self.config.audio_eos_id):
+                break
+            frames.append(curr_token[0:1,])
+            
+            if callback:
+                callback(i, max_audio_frames)
+
+        frames = torch.stack(frames).permute(1, 2, 0).squeeze(0)
+        self._unload()
+        
+        # Move Mula back to CPU if offload is enabled
+        if self.cpu_offload:
+            print("Moving HeartMuLa back to CPU...")
+            self.mula.to("cpu")
+            torch.cuda.empty_cache()
+            
+        return {"frames": frames}
+
+    def postprocess(self, model_outputs: Dict[str, Any], save_path: str):
+        # Move Codec to GPU if offload is enabled
+        if self.cpu_offload:
+            print(f"Moving HeartCodec to {self.codec_device}...")
+            self.codec.to(self.codec_device)
+            
+        frames = model_outputs["frames"].to(self.codec_device)
+        wav = self.codec.detokenize(frames)
+        self._unload()
+        
+        # Move Codec back to CPU if offload is enabled
+        if self.cpu_offload:
+            print("Moving HeartCodec back to CPU...")
+            self.codec.to("cpu")
+            torch.cuda.empty_cache()
+
+        # torchaudio.save(save_path, wav.to(torch.float32).cpu(), 48000)
+        print(f"Saving to {save_path} using soundfile...")
+        
+        audio_data = wav.to(torch.float32).cpu().squeeze().numpy()
+        print(f"Audio data shape: {audio_data.shape}")
+        
+        # Ensure (L, C) format for soundfile if multiple channels
+        if len(audio_data.shape) == 2 and audio_data.shape[0] < audio_data.shape[1]:
+            print("Transposing audio data to (L, C) format...")
+            audio_data = audio_data.T
+            
+        sf.write(save_path, audio_data, 48000)
+
+    def __call__(self, inputs: Dict[str, Any], **kwargs):
+        preprocess_kwargs, forward_kwargs, postprocess_kwargs = (
+            self._sanitize_parameters(**kwargs)
+        )
+        model_inputs = self.preprocess(inputs, **preprocess_kwargs)
+        model_outputs = self._forward(model_inputs, **forward_kwargs)
+        self.postprocess(model_outputs, **postprocess_kwargs)
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_path: str,
+        device: Union[torch.device, Dict[str, torch.device]],
+        dtype: Union[torch.dtype, Dict[str, torch.dtype]],
+        version: str,
+        lazy_load: bool = False,
+        cpu_offload: bool = False,
+        explicit_codec_path: Optional[str] = None,
+    ):
+
+        mula_path, codec_path, tokenizer_path, gen_config_path = _resolve_paths(
+            pretrained_path, version
+        )
+        
+        # Override codec path if explicitly provided
+        if explicit_codec_path:
+            codec_path = explicit_codec_path
+            
+        mula_device, codec_device, lazy_load = _resolve_devices(device, lazy_load)
+        
+        # Try to load tokenizer and gen_config from safetensors metadata first
+        tokenizer = None
+        gen_config = None
+        
+        if mula_path.endswith(".safetensors") and os.path.exists(mula_path):
+            try:
+                with safe_open(mula_path, framework="pt", device="cpu") as f:
+                    metadata = f.metadata()
+                    if metadata:
+                        if "tokenizer.json" in metadata:
+                            print(f"Loading tokenizer from {mula_path} metadata...")
+                            tokenizer = Tokenizer.from_str(metadata["tokenizer.json"])
+                        
+                        if "gen_config.json" in metadata:
+                            print(f"Loading gen_config from {mula_path} metadata...")
+                            config_dict = json.loads(metadata["gen_config.json"])
+                            gen_config = HeartMuLaGenConfig(**config_dict)
+            except Exception as e:
+                print(f"Failed to load metadata from {mula_path}: {e}")
+
+        # Determine essential_files directory for fallback
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        plugin_root = os.path.abspath(os.path.join(current_file_dir, "..", ".."))
+        essential_files_dir = os.path.join(plugin_root, "essential_files")
+
+        # Fallback to files if not found in metadata
+        if tokenizer is None:
+            if tokenizer_path and os.path.exists(tokenizer_path):
+                tokenizer = Tokenizer.from_file(tokenizer_path)
+            else:
+                # Try essential files fallback
+                fallback_tokenizer = os.path.join(essential_files_dir, "tokenizer.json")
+                if os.path.exists(fallback_tokenizer):
+                     print(f"Tokenizer not found in metadata or checkpoint dir, using fallback: {fallback_tokenizer}")
+                     tokenizer = Tokenizer.from_file(fallback_tokenizer)
+                else:
+                     raise FileNotFoundError(f"Tokenizer not found in metadata or at {tokenizer_path}")
+
+        if gen_config is None:
+             if gen_config_path and os.path.exists(gen_config_path):
+                gen_config = HeartMuLaGenConfig.from_file(gen_config_path)
+             else:
+                # Try essential files fallback
+                fallback_config = os.path.join(essential_files_dir, "gen_config.json")
+                if os.path.exists(fallback_config):
+                     print(f"GenConfig not found in metadata or checkpoint dir, using fallback: {fallback_config}")
+                     gen_config = HeartMuLaGenConfig.from_file(fallback_config)
+                else:
+                    raise FileNotFoundError(f"GenConfig not found in metadata or at {gen_config_path}")
+
+        mula_dtype = dtype["mula"] if isinstance(dtype, dict) else dtype
+        codec_dtype = dtype["codec"] if isinstance(dtype, dict) else dtype
+
+        return cls(
+            heartmula_path=mula_path,
+            heartcodec_path=codec_path,
+            heartmula_device=mula_device,
+            heartcodec_device=codec_device,
+            lazy_load=lazy_load,
+            cpu_offload=cpu_offload,
+            muq_mulan=None,
+            text_tokenizer=tokenizer,
+            config=gen_config,
+            heartmula_dtype=mula_dtype,
+            heartcodec_dtype=codec_dtype,
+        )
