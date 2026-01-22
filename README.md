@@ -9,6 +9,13 @@
 本项目提供用于运行 HeartMuLa-oss-3B 音乐生成模型的 ComfyUI 节点。
 它是自包含的，内置了 `heartlib` 核心库，无需额外配置环境路径。
 
+### 工作流示例
+
+![Workflow Example](./assets/workflow_example.png)
+
+👉 **[下载工作流文件 (HeartMuLa-oss-gen-example.json)](https://github.com/crazyma99/ComfyUI-HeartMuLa/blob/master/HeartMuLa-oss-gen-example.json)**
+
+
 ### 安装
 
 1.  将 `ComfyUI-HeartMuLa` 文件夹复制到您的 `ComfyUI/custom_nodes/` 目录中。
