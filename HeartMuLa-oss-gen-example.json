@@ -1,0 +1,53 @@
+{
+  "4": {
+    "inputs": {
+      "mula_model": "HeartMuLa-oss-3B-merged.safetensors",
+      "codec_model": "HeartCodec-oss-merged.safetensors",
+      "version": "3B-merged",
+      "mula_device": "cuda",
+      "codec_device": "cuda",
+      "mula_dtype": "bfloat16",
+      "codec_dtype": "float32",
+      "cpu_offload": true
+    },
+    "class_type": "HeartMuLaLoader",
+    "_meta": {
+      "title": "HeartMuLa Loader"
+    }
+  },
+  "12": {
+    "inputs": {
+      "audioUI": "",
+      "audio": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "PreviewAudio",
+    "_meta": {
+      "title": "预览音频"
+    }
+  },
+  "17": {
+    "inputs": {
+      "vocal_gender": "Female",
+      "style_preset": "None,pop,rock,R&B",
+      "instrument_preset": "None,ukulele,violin,piano,guitar,drums",
+      "lyrics": "Enter lyrics here",
+      "tags": "emotional, high quality",
+      "max_audio_length_ms": 60000,
+      "topk": 50,
+      "temperature": 1,
+      "cfg_scale": 1.5,
+      "seed": 753482296389189,
+      "pipe": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "HeartMuLaGenerator",
+    "_meta": {
+      "title": "HeartMuLa Generator"
+    }
+  }
+}

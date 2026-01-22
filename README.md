@@ -33,10 +33,15 @@
     *   **codec_model**：选择 HeartCodec 编解码模型。
     *   **cpu_offload**：启用以节省显存（推荐消费级显卡使用）。
 2.  **HeartMuLa Generator (生成器)**：根据文本生成音频。
-    *   **lyrics**：在此输入歌词。
-    *   **tags**：输入风格标签（例如 "pop, female vocal"）。
-    *   **max_audio_length_ms**：时长（毫秒）。
+    *   **Preset UI**: 节点内置了可视化的预设选择界面，支持选择 Vocal（人声性别）、Style（风格）、Instrument（乐器）。
+    *   **Vocal**: 支持 Female, Male, Chorus。
+    *   **Style/Instrument**: 支持多选。
+    *   **lyrics**: 在此输入歌词。
+    *   **tags**: 输入风格标签（例如 "pop, female vocal"）。
+    *   **max_audio_length_ms**: 时长（毫秒）。
 3.  **HeartMuLa Preview/Save (预览/保存)**：播放并保存生成的音频。
+
+> 💡 **提示**：您可以在本仓库中找到示例工作流文件 `HeartMuLa-oss-gen-example.json`，直接拖入 ComfyUI 即可使用。
 
 ### 节点说明
 
@@ -100,6 +105,8 @@ This custom node suite follows a 3-step workflow:
     *   **tags**: Enter additional style tags.
     *   **max_audio_length_ms**: Duration in milliseconds.
 3.  **HeartMuLa Preview/Save**: Plays and saves the generated audio.
+
+> 💡 **Tip**: You can find an example workflow file `HeartMuLa-oss-gen-example.json` in this repository. Simply drag and drop it into ComfyUI to get started.
 
 ### Nodes
 
