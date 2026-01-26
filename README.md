@@ -30,8 +30,12 @@
 
 👉 **[下载模型 (ModelScope)](https://modelscope.cn/models/AIGCCrazyMa/HeartMuLa-oss_ComfyUI/)**
 
-1.  下载 `HeartMuLa-oss-3B-merged.safetensors` 并放入 `ComfyUI/models/checkpoints/`。
-2.  下载 `HeartCodec-oss-merged.safetensors` 并放入 `ComfyUI/models/checkpoints/`。
+1.  下载 `HeartMuLa-oss-3B-merged.safetensors` (或新版 `HeartMuLa-RL-oss-3B-20260123-merged.safetensors`) 并放入 `ComfyUI/models/checkpoints/`。
+2.  下载 `HeartCodec-oss-merged.safetensors` (或新版 `HeartCodec-oss-20260123-merged.safetensors`) 并放入 `ComfyUI/models/checkpoints/`。
+
+**使用新版模型 (20260123):**
+1.  下载模型后放入 checkpoints 目录。
+2.  在 HeartMuLa Loader 节点中，将 `version` 选项设置为 `3B-20260123`。
 
 ### 使用方法
 
@@ -104,9 +108,12 @@ It is self-contained and includes the `heartlib` core library.
 
 👉 **[Download Models (ModelScope)](https://modelscope.cn/models/AIGCCrazyMa/HeartMuLa-oss_ComfyUI/)**
 
-1.  Download `HeartMuLa-oss-3B-merged.safetensors` and place into `ComfyUI/models/checkpoints/`.
-2.  Download `HeartCodec-oss-merged.safetensors` and place into `ComfyUI/models/checkpoints/`.
+1.  Download `HeartMuLa-oss-3B-merged.safetensors` (or new `HeartMuLa-RL-oss-3B-20260123-merged.safetensors`) and place into `ComfyUI/models/checkpoints/`.
+2.  Download `HeartCodec-oss-merged.safetensors` (or new `HeartCodec-oss-20260123-merged.safetensors`) and place into `ComfyUI/models/checkpoints/`.
 
+**Using New Models (20260123):**
+1.  Place the downloaded models in the checkpoints directory.
+2.  In the HeartMuLa Loader node, set the `version` option to `3B-20260123`.
 
 ### Usage
 
