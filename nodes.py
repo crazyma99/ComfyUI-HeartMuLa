@@ -29,7 +29,7 @@ class HeartMuLaLoader:
             "required": {
                 "mula_model": (folder_paths.get_filename_list("checkpoints"), ),
                 "codec_model": (folder_paths.get_filename_list("checkpoints"), ),
-                "version": (["3B-merged"], {"default": "3B-merged"}),
+                "version": (["3B-merged", "3B-20260123"], {"default": "3B-20260123"}),
                 "mula_device": (["cuda", "cpu"], {"default": "cuda"}),
                 "codec_device": (["cuda", "cpu"], {"default": "cuda"}),
                 "mula_dtype": (["bfloat16", "float16", "float32"], {"default": "bfloat16"}),

@@ -96,6 +96,9 @@ def _resolve_paths(pretrained_path: str, version: str):
     else:
         # Original logic adapted
         heartmula_path_orig = os.path.join(pretrained_path, f"HeartMuLa-oss-{version}")
+        if version == "3B-20260123":
+             heartmula_path_orig = os.path.join(pretrained_path, "HeartMuLa-RL-oss-3B-20260123")
+             
         merged_path = os.path.join(pretrained_path, "HeartMuLa-oss-3B-merged.safetensors")
         model_safetensors = os.path.join(pretrained_path, "model.safetensors")
         
@@ -107,6 +110,8 @@ def _resolve_paths(pretrained_path: str, version: str):
             heartmula_path = model_safetensors
         elif version == "3B-merged" and os.path.exists(os.path.join(pretrained_path, "model.safetensors")):
              heartmula_path = os.path.join(pretrained_path, "model.safetensors")
+        elif version == "3B-20260123" and os.path.exists(os.path.join(pretrained_path, "model.safetensors")):
+             heartmula_path = os.path.join(pretrained_path, "model.safetensors")
         else:
              # Default fallback if nothing found, to let it fail later or be caught
              heartmula_path = heartmula_path_orig
@@ -114,6 +119,9 @@ def _resolve_paths(pretrained_path: str, version: str):
         # Check local dir for aux files
         codec_local = os.path.join(pretrained_path, "HeartCodec-oss")
         codec_merged = os.path.join(pretrained_path, "HeartCodec-oss-merged.safetensors")
+        if version == "3B-20260123":
+            codec_local = os.path.join(pretrained_path, "HeartCodec-oss-20260123")
+            codec_merged = os.path.join(pretrained_path, "HeartCodec-oss-20260123-merged.safetensors")
         
         if os.path.exists(codec_merged):
             heartcodec_path = codec_merged
